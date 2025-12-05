@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# --- Cortex Cloud Sizing (Azure Native) ---
+# --- Cortex Cloud Sizing (Azure Native - Multi-Sub) ---
 # Hosted by: Valley-CortexCloud
-# Purpose: Robust sizing for Azure Cloud Workloads
+# Purpose: Robust sizing for Azure Cloud (Scans ALL Subscriptions)
 
 # 0. Self-Healing: Install required Azure Extensions silently
 az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
@@ -15,17 +15,26 @@ echo "=================================================="
 echo "   CORTEX CLOUD - CLOUD SIZING CALCULATOR"
 echo "=================================================="
 
-# Get Sub Info
-SUB_ID=$(az account show --query id -o tsv)
-SUB_NAME=$(az account show --query name -o tsv)
-echo "Targeting Subscription: $SUB_NAME"
-echo "Analyzing resources..."
+# 1. Get ALL Active Subscriptions
+# We fetch all IDs and format them as a space-separated list for the query
+echo "Fetching subscription list..."
+ALL_SUBS=$(az account list --query "[?state=='Enabled'].id" -o tsv | tr '\n' ' ')
+SUB_COUNT=$(echo "$ALL_SUBS" | wc -w)
 
-# HELPER FUNCTION: Runs query and ensures 0 is returned if empty
-# We use 'summarize Val=count()' to force a specific column name "Val"
+if [[ -z "$ALL_SUBS" ]]; then
+    echo "Error: No active subscriptions found."
+    exit 1
+fi
+
+echo "Targeting Scope: $SUB_COUNT Subscription(s)"
+echo "Analyzing resources across entire environment..."
+
+# HELPER FUNCTION: Runs query against ALL subs and ensures 0 is returned if empty
 run_query() {
     local query="$1"
-    local result=$(az graph query -q "$query | summarize Val=count()" --query "data[0].Val" -o tsv 2>/dev/null)
+    # We pass $ALL_SUBS to the --subscriptions flag to force global scope
+    local result=$(az graph query -q "$query | summarize Val=count()" --subscriptions $ALL_SUBS --query "data[0].Val" -o tsv 2>/dev/null)
+    
     if [[ -z "$result" ]]; then
         echo "0"
     else
@@ -33,7 +42,7 @@ run_query() {
     fi
 }
 
-# 1. Run Queries (Now using the helper function)
+# 2. Run Queries (Now scoped to all subscriptions)
 
 # VMs (Running)
 VM_COUNT=$(run_query "Resources | where type =~ 'Microsoft.Compute/virtualMachines' and properties.extended.instanceView.powerState.code == 'PowerState/running'")
@@ -53,7 +62,7 @@ COSMOS_DBS=$(run_query "Resources | where type =~ 'Microsoft.DocumentDB/database
 # Storage Accounts
 STORAGE_ACCS=$(run_query "Resources | where type =~ 'Microsoft.Storage/storageAccounts'")
 
-# 2. Calculate Credits
+# 3. Calculate Credits
 # Logic: (Count + UnitSize - 1) / UnitSize performs ceiling division
 
 # C1: Data/Storage (Storage /10, DBs /2)
@@ -69,7 +78,7 @@ TOTAL_C3=$(( C3_VM + C3_FUNC + C3_CONT ))
 
 TOTAL_CREDITS=$(( TOTAL_C1 + TOTAL_C3 ))
 
-# 3. Output Results
+# 4. Output Results
 echo "--------------------------------------------------"
 printf "%-30s %-10s\n" "RESOURCE TYPE" "COUNT"
 echo "--------------------------------------------------"
