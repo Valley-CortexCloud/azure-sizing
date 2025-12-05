@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# --- Cortex Cloud Sizing (Azure Native - Multi-Sub) ---
+# --- Cortex Cloud Sizing (Azure Native - Multi-Sub Audit) ---
 # Hosted by: Valley-CortexCloud
-# Purpose: Robust sizing for Azure Cloud (Scans ALL Subscriptions)
+# Purpose: Deep audit of Cloud Workloads
 
 # 0. Self-Healing: Install required Azure Extensions silently
 az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
@@ -11,29 +11,49 @@ if ! az extension show --name resource-graph &>/dev/null; then
     az extension add --name resource-graph &>/dev/null
 fi
 
+clear
 echo "=================================================="
-echo "   CORTEX CLOUD - CLOUD SIZING CALCULATOR"
+echo "   CORTEX CLOUD - AZURE WORKLOAD SIZING TOOL"
 echo "=================================================="
 
-# 1. Get ALL Active Subscriptions
-# We fetch all IDs and format them as a space-separated list for the query
-echo "Fetching subscription list..."
-ALL_SUBS=$(az account list --query "[?state=='Enabled'].id" -o tsv | tr '\n' ' ')
-SUB_COUNT=$(echo "$ALL_SUBS" | wc -w)
+# 1. SCOPE VALIDATION (The Trust Builder)
+echo ""
+echo "PHASE 1: SCOPE VALIDATION"
+echo "--------------------------------------------------"
 
-if [[ -z "$ALL_SUBS" ]]; then
+# Get list of ALL active subscriptions (Name and ID)
+# We use a temporary file to handle spaces in names correctly during the loop
+TEMP_SUB_LIST=$(mktemp)
+az account list --query "[?state=='Enabled'].{Name:name, Id:id}" -o tsv > "$TEMP_SUB_LIST"
+
+# Count them
+SUB_COUNT=$(wc -l < "$TEMP_SUB_LIST")
+
+# Print them nicely with a checkmark
+while IFS=$'\t' read -r name id; do
+    echo "  [✓] Found: $name ($id)"
+done < "$TEMP_SUB_LIST"
+
+# Create the ID list for the query engine
+ALL_SUBS_IDS=$(cut -f2 "$TEMP_SUB_LIST" | tr '\n' ' ')
+rm "$TEMP_SUB_LIST"
+
+if [[ $SUB_COUNT -eq 0 ]]; then
     echo "Error: No active subscriptions found."
     exit 1
 fi
 
-echo "Targeting Scope: $SUB_COUNT Subscription(s)"
-echo "Analyzing resources across entire environment..."
+echo "--------------------------------------------------"
+echo "  >> TARGETING SCOPE: $SUB_COUNT SUBSCRIPTIONS"
+echo "--------------------------------------------------"
+echo ""
+echo "PHASE 2: ANALYZING RESOURCES..."
 
 # HELPER FUNCTION: Runs query against ALL subs and ensures 0 is returned if empty
 run_query() {
     local query="$1"
-    # We pass $ALL_SUBS to the --subscriptions flag to force global scope
-    local result=$(az graph query -q "$query | summarize Val=count()" --subscriptions $ALL_SUBS --query "data[0].Val" -o tsv 2>/dev/null)
+    # We pass $ALL_SUBS_IDS to the --subscriptions flag to force global scope
+    local result=$(az graph query -q "$query | summarize Val=count()" --subscriptions $ALL_SUBS_IDS --query "data[0].Val" -o tsv 2>/dev/null)
     
     if [[ -z "$result" ]]; then
         echo "0"
@@ -42,7 +62,7 @@ run_query() {
     fi
 }
 
-# 2. Run Queries (Now scoped to all subscriptions)
+# 2. Run Queries (Scoped to all subscriptions)
 
 # VMs (Running)
 VM_COUNT=$(run_query "Resources | where type =~ 'Microsoft.Compute/virtualMachines' and properties.extended.instanceView.powerState.code == 'PowerState/running'")
@@ -79,7 +99,10 @@ TOTAL_C3=$(( C3_VM + C3_FUNC + C3_CONT ))
 TOTAL_CREDITS=$(( TOTAL_C1 + TOTAL_C3 ))
 
 # 4. Output Results
-echo "--------------------------------------------------"
+echo ""
+echo "=================================================="
+echo " FINAL REPORT (Aggregated from $SUB_COUNT Subscriptions)"
+echo "=================================================="
 printf "%-30s %-10s\n" "RESOURCE TYPE" "COUNT"
 echo "--------------------------------------------------"
 printf "%-30s %-10s\n" "VMs (Running)" "$VM_COUNT"
@@ -89,7 +112,7 @@ printf "%-30s %-10s\n" "SQL Databases" "$SQL_DBS"
 printf "%-30s %-10s\n" "Cosmos DB Accounts" "$COSMOS_DBS"
 printf "%-30s %-10s\n" "Storage Accounts" "$STORAGE_ACCS"
 echo "=================================================="
-echo " ESTIMATED LICENSING (CREDITS)"
+echo " ESTIMATED CORTEX LICENSING (CREDITS)"
 echo "=================================================="
 echo "  C1 (Data & Storage):  $TOTAL_C1 credits"
 echo "  C3 (Cloud Compute):   $TOTAL_C3 credits"
