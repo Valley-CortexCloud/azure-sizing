@@ -4,7 +4,7 @@
 # No dependencies. Runs instantly via Azure Resource Graph.
 
 echo "=================================================="
-echo "   CORTEX XSIAM - CLOUD SIZING CALCULATOR"
+echo "   CORTEX CLOUD - CLOUD SIZING CALCULATOR"
 echo "=================================================="
 
 # Get Sub Info
