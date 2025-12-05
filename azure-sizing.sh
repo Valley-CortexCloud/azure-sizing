@@ -65,7 +65,7 @@ run_query() {
 # 2. Run Queries (Scoped to all subscriptions)
 
 # VMs (Running)
-VM_COUNT=$(run_query "Resources | where type =~ 'Microsoft.Compute/virtualMachines' and properties.extended.instanceView.powerState.code == 'PowerState/running'")
+VM_COUNT=$(run_query "Resources | where type =~ 'Microsoft.Compute/virtualMachines'")
 
 # AKS Nodes (Complex join)
 AKS_NODES=$(run_query "Resources | where type =~ 'Microsoft.ContainerService/managedClusters' | project id | join kind=leftouter (Resources | where type =~ 'Microsoft.Compute/virtualMachineScaleSets' | where sku.capacity > 0) on \$left.id == \$right.properties.virtualMachineProfile.osProfile.customData")
@@ -105,7 +105,7 @@ echo " FINAL REPORT (Aggregated from $SUB_COUNT Subscriptions)"
 echo "=================================================="
 printf "%-30s %-10s\n" "RESOURCE TYPE" "COUNT"
 echo "--------------------------------------------------"
-printf "%-30s %-10s\n" "VMs (Running)" "$VM_COUNT"
+printf "%-30s %-10s\n" "VMs" "$VM_COUNT"
 printf "%-30s %-10s\n" "AKS/Container Nodes" "$AKS_NODES"
 printf "%-30s %-10s\n" "Function Apps" "$FUNC_APPS"
 printf "%-30s %-10s\n" "SQL Databases" "$SQL_DBS"
