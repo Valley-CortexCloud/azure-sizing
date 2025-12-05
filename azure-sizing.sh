@@ -1,49 +1,67 @@
 #!/bin/bash
 
-# --- Cortex XSIAM Sizing Script (Azure Native) ---
-# No dependencies. Runs instantly via Azure Resource Graph.
+# --- Cortex Cloud Sizing (Azure Native) ---
+# Hosted by: Valley-CortexCloud
+# Purpose: Robust sizing for Azure Cloud Workloads
+
+# 0. Self-Healing: Install required Azure Extensions silently
+az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
+if ! az extension show --name resource-graph &>/dev/null; then
+    echo "Initializing Azure Resource Graph..."
+    az extension add --name resource-graph &>/dev/null
+fi
 
 echo "=================================================="
 echo "   CORTEX CLOUD - CLOUD SIZING CALCULATOR"
 echo "=================================================="
 
-az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
-if ! az extension show --name resource-graph &>/dev/null; then
-    echo "Initializing Azure Resource Graph (First run only)..."
-    az extension add --name resource-graph &>/dev/null
-fi
-
 # Get Sub Info
 SUB_ID=$(az account show --query id -o tsv)
 SUB_NAME=$(az account show --query name -o tsv)
-echo "Targeting Subscription: $SUB_NAME ($SUB_ID)"
+echo "Targeting Subscription: $SUB_NAME"
 echo "Analyzing resources..."
 
-# 1. Run Fast Queries (using Azure Resource Graph)
-# We use || echo 0 to handle empty results gracefully
-VM_COUNT=$(az graph query -q "Resources | where type =~ 'Microsoft.Compute/virtualMachines' and properties.extended.instanceView.powerState.code == 'PowerState/running' | count" --query "data[0].count_0" -o tsv 2>/dev/null || echo 0)
+# HELPER FUNCTION: Runs query and ensures 0 is returned if empty
+# We use 'summarize Val=count()' to force a specific column name "Val"
+run_query() {
+    local query="$1"
+    local result=$(az graph query -q "$query | summarize Val=count()" --query "data[0].Val" -o tsv 2>/dev/null)
+    if [[ -z "$result" ]]; then
+        echo "0"
+    else
+        echo "$result"
+    fi
+}
 
-AKS_NODES=$(az graph query -q "Resources | where type =~ 'Microsoft.ContainerService/managedClusters' | project id | join kind=leftouter (Resources | where type =~ 'Microsoft.Compute/virtualMachineScaleSets' | where sku.capacity > 0) on \$left.id == \$right.properties.virtualMachineProfile.osProfile.customData | summarize count()" --query "data[0].count_" -o tsv 2>/dev/null || echo 0)
+# 1. Run Queries (Now using the helper function)
 
-FUNC_APPS=$(az graph query -q "Resources | where type =~ 'Microsoft.Web/sites' and kind contains 'function' | count" --query "data[0].count_0" -o tsv 2>/dev/null || echo 0)
+# VMs (Running)
+VM_COUNT=$(run_query "Resources | where type =~ 'Microsoft.Compute/virtualMachines' and properties.extended.instanceView.powerState.code == 'PowerState/running'")
 
-SQL_DBS=$(az graph query -q "Resources | where type =~ 'Microsoft.Sql/servers/databases' and name != 'master' | count" --query "data[0].count_0" -o tsv 2>/dev/null || echo 0)
+# AKS Nodes (Complex join)
+AKS_NODES=$(run_query "Resources | where type =~ 'Microsoft.ContainerService/managedClusters' | project id | join kind=leftouter (Resources | where type =~ 'Microsoft.Compute/virtualMachineScaleSets' | where sku.capacity > 0) on \$left.id == \$right.properties.virtualMachineProfile.osProfile.customData")
 
-COSMOS_DBS=$(az graph query -q "Resources | where type =~ 'Microsoft.DocumentDB/databaseAccounts' | count" --query "data[0].count_0" -o tsv 2>/dev/null || echo 0)
+# Function Apps
+FUNC_APPS=$(run_query "Resources | where type =~ 'Microsoft.Web/sites' and kind contains 'function'")
 
-STORAGE_ACCS=$(az graph query -q "Resources | where type =~ 'Microsoft.Storage/storageAccounts' | count" --query "data[0].count_0" -o tsv 2>/dev/null || echo 0)
+# SQL Databases
+SQL_DBS=$(run_query "Resources | where type =~ 'Microsoft.Sql/servers/databases' and name != 'master'")
 
-# 2. Calculate Credits (Rounding Up Logic)
-# Logic: (Count + UnitSize - 1) / UnitSize performs ceiling division in Bash integer math
+# Cosmos DB
+COSMOS_DBS=$(run_query "Resources | where type =~ 'Microsoft.DocumentDB/databaseAccounts'")
 
-# C1: Data/Storage
-# Storage: /10, DBs: /2
+# Storage Accounts
+STORAGE_ACCS=$(run_query "Resources | where type =~ 'Microsoft.Storage/storageAccounts'")
+
+# 2. Calculate Credits
+# Logic: (Count + UnitSize - 1) / UnitSize performs ceiling division
+
+# C1: Data/Storage (Storage /10, DBs /2)
 C1_STORAGE=$(( (STORAGE_ACCS + 9) / 10 ))
 C1_DB=$(( (SQL_DBS + COSMOS_DBS + 1) / 2 ))
 TOTAL_C1=$(( C1_STORAGE + C1_DB ))
 
-# C3: Compute
-# VMs: /1, Serverless: /25, Containers: /10
+# C3: Compute (VMs /1, Serverless /25, Containers /10)
 C3_VM=$(( VM_COUNT ))
 C3_FUNC=$(( (FUNC_APPS + 24) / 25 ))
 C3_CONT=$(( (AKS_NODES + 9) / 10 ))
