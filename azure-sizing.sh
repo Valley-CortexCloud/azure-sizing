@@ -7,6 +7,12 @@ echo "=================================================="
 echo "   CORTEX CLOUD - CLOUD SIZING CALCULATOR"
 echo "=================================================="
 
+az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
+if ! az extension show --name resource-graph &>/dev/null; then
+    echo "Initializing Azure Resource Graph (First run only)..."
+    az extension add --name resource-graph &>/dev/null
+fi
+
 # Get Sub Info
 SUB_ID=$(az account show --query id -o tsv)
 SUB_NAME=$(az account show --query name -o tsv)
