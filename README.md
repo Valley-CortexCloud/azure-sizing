@@ -13,4 +13,4 @@ You can run this tool directly in the **Azure Cloud Shell (Bash)**. No cloning o
 Copy and paste the following command:
 
 ```bash
-bash <(curl -sL [https://raw.githubusercontent.com/Valley-CortexCloud/azure-sizing/main/azure-sizing.sh](https://raw.githubusercontent.com/Valley-CortexCloud/azure-sizing/main/azure-sizing.sh))
+bash <(curl -sL https://raw.githubusercontent.com/Valley-CortexCloud/azure-sizing/main/azure-sizing-v2.sh)
